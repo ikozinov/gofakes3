@@ -974,6 +974,11 @@ func metadataHeaders(headers map[string][]string, at time.Time, sizeLimit int) (
 			meta[hk] = hv[0]
 		}
 	}
+
+	if contentType, ok := headers["Content-Type"]; ok {
+		meta["Content-Type"] = contentType[0]
+	}
+
 	meta["Last-Modified"] = formatHeaderTime(at)
 
 	if sizeLimit > 0 && metadataSize(meta) > sizeLimit {

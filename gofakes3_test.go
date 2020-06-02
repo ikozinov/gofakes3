@@ -131,6 +131,24 @@ func TestCreateObject(t *testing.T) {
 	}
 }
 
+func TestCreateObjectWithContentType(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	svc := ts.s3Client()
+
+	_, err := svc.PutObject(&s3.PutObjectInput{
+		Bucket:      aws.String(defaultBucket),
+		Key:         aws.String("object"),
+		Body:        bytes.NewReader([]byte("hello")),
+		ContentType: aws.String("application/octet-stream"),
+	})
+	ts.OK(err)
+
+	if !ts.backendObjectHasContentType(defaultBucket, "object", "application/octet-stream") {
+		t.Fatal("object content type invalid")
+	}
+}
+
 func TestCreateObjectMetadataSizeLimit(t *testing.T) {
 	ts := newTestServer(t, withFakerOptions(
 		gofakes3.WithMetadataSizeLimit(1),
@@ -430,6 +448,55 @@ func TestGetObjectRange(t *testing.T) {
 	}
 }
 
+func TestGetObjectContentType(t *testing.T) {
+	assertContentType := func(ts *testServer, key string, expected string) {
+		ts.Helper()
+		svc := ts.s3Client()
+		obj, err := svc.GetObject(&s3.GetObjectInput{
+			Bucket: aws.String(defaultBucket),
+			Key:    aws.String(key),
+		})
+		ts.OK(err)
+		defer obj.Body.Close()
+
+		if aws.StringValue(obj.ContentType) != expected {
+			ts.Fatal("content-type failed", aws.StringValue(obj.ContentType), expected)
+		}
+	}
+
+	in := randomFileBody(1024)
+
+	for idx, tc := range []struct {
+		contentType string
+	}{
+		{
+			"not-empty-content-type",
+		},
+		{
+			"",
+		},
+	} {
+		t.Run(fmt.Sprintf("%d/%s", idx, tc.contentType), func(t *testing.T) {
+			ts := newTestServer(t)
+			defer ts.Close()
+
+			svc := ts.s3Client()
+
+			_, err := svc.PutObject(&s3.PutObjectInput{
+				Bucket:      aws.String(defaultBucket),
+				Key:         aws.String("foo"),
+				Body:        bytes.NewReader(in),
+				ContentType: aws.String(tc.contentType),
+			})
+
+			ts.OK(err)
+
+			assertContentType(ts, "foo", tc.contentType)
+		})
+	}
+
+}
+
 func TestGetObjectRangeInvalid(t *testing.T) {
 	assertRangeInvalid := func(ts *testServer, key string, hdr string) {
 		svc := ts.s3Client()
@@ -483,7 +550,7 @@ func TestCreateObjectBrowserUpload(t *testing.T) {
 		return httpClient().Do(req)
 	}
 
-	assertUpload := func(ts *testServer, bucket string, w *multipart.Writer, body io.Reader, etag string) {
+	assertUpload := func(ts *testServer, bucket string, w *multipart.Writer, body io.Reader, etag, contentType string) {
 		res, err := upload(ts, bucket, w, body)
 		ts.OK(err)
 		if res.StatusCode != http.StatusOK {
@@ -492,6 +559,11 @@ func TestCreateObjectBrowserUpload(t *testing.T) {
 		if etag != "" && res.Header.Get("ETag") != etag {
 			ts.Fatal("bad etag", res.Header.Get("ETag"), etag)
 		}
+
+		if contentType != "" && res.Header.Get("Content-Type") != contentType {
+			ts.Fatal("bad content-type", res.Header.Get("Content-Type"), contentType)
+		}
+
 	}
 
 	assertUploadFails := func(ts *testServer, bucket string, w *multipart.Writer, body io.Reader, expectedCode gofakes3.ErrorCode) {
@@ -516,7 +588,7 @@ func TestCreateObjectBrowserUpload(t *testing.T) {
 		var b bytes.Buffer
 		w := multipart.NewWriter(&b)
 		addFile(ts.TT, w, "yep", []byte("stuff"))
-		assertUpload(ts, defaultBucket, w, &b, `"c13d88cb4cb02003daedb8a84e5d272a"`)
+		assertUpload(ts, defaultBucket, w, &b, `"c13d88cb4cb02003daedb8a84e5d272a"`, "1")
 		ts.assertObject(defaultBucket, "yep", nil, "stuff")
 	})
 

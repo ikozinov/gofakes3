@@ -248,6 +248,19 @@ func (ts *testServer) backendObjectExists(bucket, key string) bool {
 	return obj != nil
 }
 
+func (ts *testServer) backendObjectHasContentType(bucket, key, contentType string) bool {
+	ts.Helper()
+	obj, err := ts.backend.HeadObject(bucket, key)
+	if err != nil {
+		if hasErrorCode(err, gofakes3.ErrNoSuchKey) {
+			return false
+		} else {
+			ts.Fatal(err)
+		}
+	}
+	return obj.Metadata["Content-Type"] == contentType
+}
+
 func (ts *testServer) backendPutString(bucket, key string, meta map[string]string, in string) {
 	ts.Helper()
 	ts.OKAll(ts.backend.PutObject(bucket, key, meta, strings.NewReader(in), int64(len(in))))
